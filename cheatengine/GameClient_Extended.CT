@@ -1,0 +1,255 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CheatTable CheatEngineTableVersion="29">
+  <CheatEntries>
+    <!-- ========================================== -->
+    <!-- ORIGINAL PATCHES (Working)                 -->
+    <!-- ========================================== -->
+    <CheatEntry>
+      <ID>0</ID>
+      <Description>"[CORE] ServerChk pass"</Description>
+      <LastState Activated="1"/>
+      <VariableType>Auto Assembler Script</VariableType>
+      <AssemblerScript>[ENABLE]
+007565AE: //Checking connection 1
+jmp 00756682
+
+00756682: //Force end
+jmp 007568BE
+
+[DISABLE]
+007565AE:
+db 83 78 1C 02
+
+00756682:
+db 83 7E 10 00
+</AssemblerScript>
+    </CheatEntry>
+    <CheatEntry>
+      <ID>1</ID>
+      <Description>"[CORE] LaunchArg pass"</Description>
+      <LastState Activated="1"/>
+      <VariableType>Auto Assembler Script</VariableType>
+      <AssemblerScript>[ENABLE]
+0075629F: //Pass webLaunching
+db EB
+
+Alloc(Hook1,128)
+
+00756328: //terminate
+call Hook1
+
+Hook1:
+mov eax,1
+ret 0004
+ 
+[DISABLE]
+0075629F:
+db 74
+
+dealloc(Hook1)
+</AssemblerScript>
+    </CheatEntry>
+    <CheatEntry>
+      <ID>2</ID>
+      <Description>"[CORE] Terminate (Serverchk)"</Description>
+      <LastState Activated="1"/>
+      <VariableType>Auto Assembler Script</VariableType>
+      <AssemblerScript>[ENABLE]
+Alloc(Hook2,128)
+
+00755481:
+call Hook2
+
+Hook2:
+mov eax,1
+ret 0014
+
+[DISABLE]
+dealloc(Hook2)
+</AssemblerScript>
+    </CheatEntry>
+
+    <!-- ========================================== -->
+    <!-- ADDITIONAL PATCHES (From patchnote.md)     -->
+    <!-- ========================================== -->
+    <CheatEntry>
+      <ID>3</ID>
+      <Description>"[EXTRA] HackShield Bypass 1"</Description>
+      <LastState Activated="1"/>
+      <VariableType>Auto Assembler Script</VariableType>
+      <AssemblerScript>[ENABLE]
+007551F0:
+db B8 01 00 00 00 C3
+// mov eax,1; ret
+
+[DISABLE]
+007551F0:
+db 55 8B EC 83
+</AssemblerScript>
+    </CheatEntry>
+    <CheatEntry>
+      <ID>4</ID>
+      <Description>"[EXTRA] HackShield Bypass 2"</Description>
+      <LastState Activated="1"/>
+      <VariableType>Auto Assembler Script</VariableType>
+      <AssemblerScript>[ENABLE]
+00755280:
+db B8 01 00 00 00 C2 04 00
+// mov eax,1; ret 4
+
+[DISABLE]
+00755280:
+db 55 8B EC 83 E4 F8 6A FF
+</AssemblerScript>
+    </CheatEntry>
+    <CheatEntry>
+      <ID>5</ID>
+      <Description>"[EXTRA] HackShield Bypass 3"</Description>
+      <LastState Activated="1"/>
+      <VariableType>Auto Assembler Script</VariableType>
+      <AssemblerScript>[ENABLE]
+007549D0:
+db 31 C0 C3
+// xor eax,eax; ret
+
+[DISABLE]
+007549D0:
+db 55 8B EC
+</AssemblerScript>
+    </CheatEntry>
+    <CheatEntry>
+      <ID>6</ID>
+      <Description>"[EXTRA] Mutex Bypass"</Description>
+      <LastState Activated="1"/>
+      <VariableType>Auto Assembler Script</VariableType>
+      <AssemblerScript>[ENABLE]
+0075057B:
+db EB
+// JNZ -> JMP (allow multiple instances)
+
+[DISABLE]
+0075057B:
+db 75
+</AssemblerScript>
+    </CheatEntry>
+    <CheatEntry>
+      <ID>7</ID>
+      <Description>"[EXTRA] Window Mode"</Description>
+      <LastState Activated="1"/>
+      <VariableType>Auto Assembler Script</VariableType>
+      <AssemblerScript>[ENABLE]
+006514A6:
+db 33 D2 90
+// xor edx,edx; nop
+
+[DISABLE]
+006514A6:
+db 8A 51 10
+</AssemblerScript>
+    </CheatEntry>
+    <CheatEntry>
+      <ID>8</ID>
+      <Description>"[EXTRA] Error Bypass 1"</Description>
+      <LastState Activated="0"/>
+      <VariableType>Auto Assembler Script</VariableType>
+      <AssemblerScript>[ENABLE]
+00C2D120:
+db 31 C0 C3
+// xor eax,eax; ret
+
+[DISABLE]
+00C2D120:
+db 55 8B EC
+</AssemblerScript>
+    </CheatEntry>
+    <CheatEntry>
+      <ID>9</ID>
+      <Description>"[EXTRA] Error Bypass 2"</Description>
+      <LastState Activated="0"/>
+      <VariableType>Auto Assembler Script</VariableType>
+      <AssemblerScript>[ENABLE]
+00BE66A0:
+db 31 C0 C2 04 00
+// xor eax,eax; ret 4
+
+[DISABLE]
+00BE66A0:
+db 55 8B EC 6A FF
+</AssemblerScript>
+    </CheatEntry>
+    <CheatEntry>
+      <ID>10</ID>
+      <Description>"[EXTRA] PIN Validation Bypass"</Description>
+      <LastState Activated="0"/>
+      <VariableType>Auto Assembler Script</VariableType>
+      <AssemblerScript>[ENABLE]
+0064F290:
+db B8 01 00 00 00 C3
+// mov eax,1; ret
+
+[DISABLE]
+0064F290:
+db 55 8B EC 83
+</AssemblerScript>
+    </CheatEntry>
+
+    <!-- ========================================== -->
+    <!-- NMCO/AUTH PATCHES (Optional)               -->
+    <!-- ========================================== -->
+    <CheatEntry>
+      <ID>11</ID>
+      <Description>"[AUTH] NMCO Init Bypass"</Description>
+      <LastState Activated="0"/>
+      <VariableType>Auto Assembler Script</VariableType>
+      <AssemblerScript>[ENABLE]
+00674E50:
+db B8 01 00 00 00 C3
+// mov eax,1; ret
+
+[DISABLE]
+00674E50:
+db 55 8B EC 83
+</AssemblerScript>
+    </CheatEntry>
+    <CheatEntry>
+      <ID>12</ID>
+      <Description>"[AUTH] NMCO RegisterCallback Bypass"</Description>
+      <LastState Activated="0"/>
+      <VariableType>Auto Assembler Script</VariableType>
+      <AssemblerScript>[ENABLE]
+00675FE0:
+db B8 01 00 00 00 C3
+// mov eax,1; ret
+
+[DISABLE]
+00675FE0:
+db 55 8B EC 83
+</AssemblerScript>
+    </CheatEntry>
+    <CheatEntry>
+      <ID>13</ID>
+      <Description>"[AUTH] PassportLogin Bypass"</Description>
+      <LastState Activated="0"/>
+      <VariableType>Auto Assembler Script</VariableType>
+      <AssemblerScript>[ENABLE]
+00676080:
+db B8 01 00 00 00 C3
+// mov eax,1; ret
+
+[DISABLE]
+00676080:
+db 55 8B EC 83
+</AssemblerScript>
+    </CheatEntry>
+  </CheatEntries>
+  <UserdefinedSymbols/>
+  <Comments>EverPlanet KR v1842 Private Server Patches
+==========================================
+[CORE] - Required for lobby entry (3 patches)
+[EXTRA] - Additional bypasses from patchnote.md
+[AUTH] - NMCO authentication bypasses (optional)
+
+Created: 2025-12-04
+Based on: Original GameClient.CT + patchnote.md analysis
+</Comments>
+</CheatTable>

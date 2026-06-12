@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CheatTable CheatEngineTableVersion="29">
+  <CheatEntries>
+    <CheatEntry>
+      <ID>0</ID>
+      <Description>"ServerChk pass"</Description>
+      <LastState Activated="1"/>
+      <VariableType>Auto Assembler Script</VariableType>
+      <AssemblerScript>[ENABLE]
+007565AE: //Checking connection 1
+jmp 00756682
+
+00756682: //Force end
+jmp 007568BE
+
+[DISABLE]
+//code from here till the end of the code will be used to disable the cheat
+</AssemblerScript>
+    </CheatEntry>
+    <CheatEntry>
+      <ID>1</ID>
+      <Description>"LaunchArg pass"</Description>
+      <LastState Activated="1"/>
+      <VariableType>Auto Assembler Script</VariableType>
+      <AssemblerScript>[ENABLE]
+0075629F: //Pass webLaunching
+db EB
+
+Alloc(Hook,128)
+
+00756328: //terminate
+call Hook
+
+Hook:
+mov eax,1
+ret 0004
+ 
+[DISABLE]
+//code from here till the end of the code will be used to disable the cheat
+</AssemblerScript>
+    </CheatEntry>
+    <CheatEntry>
+      <ID>2</ID>
+      <Description>"Terminate (Serverchk)"</Description>
+      <LastState Activated="1"/>
+      <VariableType>Auto Assembler Script</VariableType>
+      <AssemblerScript>[ENABLE]
+Alloc(Hook,128)
+
+00755481:
+call Hook
+
+Hook:
+mov eax,1
+ret 0014
+
+[DISABLE]
+//code from here till the end of the code will be used to disable the cheat
+</AssemblerScript>
+    </CheatEntry>
+  </CheatEntries>
+  <UserdefinedSymbols/>
+  <DisassemblerComments>
+    <DisassemblerComment>
+      <Address>"GameClient.exe"+3566E0</Address>
+      <Comment>Terminated at
+</Comment>
+    </DisassemblerComment>
+  </DisassemblerComments>
+</CheatTable>

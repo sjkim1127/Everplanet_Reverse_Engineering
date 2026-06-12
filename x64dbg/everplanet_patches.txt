@@ -1,0 +1,92 @@
+// ============================================
+// EverPlanet KR v1842 - x64dbg Patch Script
+// Based on: GameClient_Extended.CT
+// ============================================
+// 
+// 사용법:
+// 1. x64dbg로 EverPlanet_KR_v1842_U_DEVM.exe 열기
+// 2. File -> Run Script 또는 이 파일 드래그 앤 드롭
+// 3. 스크립트 실행 후 F9로 실행
+//
+// 또는 수동으로:
+// 1. Ctrl+G로 주소 이동
+// 2. 해당 위치에서 Space로 어셈블리 수정
+// ============================================
+
+// [CORE] ServerChk pass - 서버 연결 확인 우회
+// 007565AE: JZ -> JMP
+007565AE:
+mov byte ptr [007565AE], E9
+mov byte ptr [007565AF], D0
+mov byte ptr [007565B0], 00
+mov byte ptr [007565B1], 00
+mov byte ptr [007565B2], 00
+
+// 00756682: 추가 점프
+00756682:
+mov byte ptr [00756682], E9
+mov byte ptr [00756683], 37
+mov byte ptr [00756684], 02
+mov byte ptr [00756685], 00
+mov byte ptr [00756686], 00
+
+// [CORE] LaunchArg pass - 웹 런처 검증 우회  
+// 0075629F: JZ -> JMP
+0075629F:
+mov byte ptr [0075629F], EB
+
+// [CORE] Terminate (Serverchk) - 종료 함수 우회
+// 00755481: mov eax,1; ret 0014
+00755481:
+mov byte ptr [00755481], B8
+mov byte ptr [00755482], 01
+mov byte ptr [00755483], 00
+mov byte ptr [00755484], 00
+mov byte ptr [00755485], 00
+mov byte ptr [00755486], C2
+mov byte ptr [00755487], 14
+mov byte ptr [00755488], 00
+
+// [EXTRA] HackShield Bypass 1
+// 007551F0: mov eax,1; ret
+007551F0:
+mov byte ptr [007551F0], B8
+mov byte ptr [007551F1], 01
+mov byte ptr [007551F2], 00
+mov byte ptr [007551F3], 00
+mov byte ptr [007551F4], 00
+mov byte ptr [007551F5], C3
+
+// [EXTRA] HackShield Bypass 2
+// 00755280: mov eax,1; ret 4
+00755280:
+mov byte ptr [00755280], B8
+mov byte ptr [00755281], 01
+mov byte ptr [00755282], 00
+mov byte ptr [00755283], 00
+mov byte ptr [00755284], 00
+mov byte ptr [00755285], C2
+mov byte ptr [00755286], 04
+mov byte ptr [00755287], 00
+
+// [EXTRA] HackShield Bypass 3
+// 007549D0: xor eax,eax; ret
+007549D0:
+mov byte ptr [007549D0], 31
+mov byte ptr [007549D1], C0
+mov byte ptr [007549D2], C3
+
+// [EXTRA] Mutex Bypass - 다중 실행 허용
+// 0075057B: JNZ -> JMP
+0075057B:
+mov byte ptr [0075057B], EB
+
+// [EXTRA] Window Mode
+// 006514A6: xor edx,edx; nop
+006514A6:
+mov byte ptr [006514A6], 33
+mov byte ptr [006514A7], D2
+mov byte ptr [006514A8], 90
+
+log "EverPlanet patches applied successfully!"
+ret
