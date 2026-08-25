@@ -22,7 +22,7 @@ permissions:
 jobs:
   thread-trace:
     runs-on: windows-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
 
     steps:
       - name: Checkout trace payload
@@ -52,6 +52,7 @@ jobs:
         id: trace
         shell: pwsh
         continue-on-error: true
+        timeout-minutes: 2
         run: |
           $ErrorActionPreference = 'Stop'
           $diag = Join-Path $env:RUNNER_TEMP 'thread-trace'
@@ -65,8 +66,12 @@ jobs:
           $stdout = Join-Path $diag 'thread-trace-stdout.txt'
           $stderr = Join-Path $diag 'thread-trace-stderr.txt'
 
-          & python $probe --exe $exe --script $forceLogin --script $headless --script $sampler --duration 20 1> $stdout 2> $stderr
-          $probeExit = $LASTEXITCODE
+          try {
+            & python $probe --exe $exe --script $forceLogin --script $headless --script $sampler --duration 20 1> $stdout 2> $stderr
+            $probeExit = $LASTEXITCODE
+          } finally {
+            Get-Process EverPlanet_KR_v1842_U_DEVM -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          }
           "probe_exit=$probeExit" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
           Write-Host '--- thread trace highlights ---'
