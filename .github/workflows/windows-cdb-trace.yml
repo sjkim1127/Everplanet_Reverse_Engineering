@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'EverPlanet/**'
+      - 'scripts/ci_cdb_trace.txt'
       - '.github/workflows/windows-cdb-trace.yml'
   workflow_dispatch:
 
@@ -20,12 +21,13 @@ jobs:
     timeout-minutes: 6
 
     steps:
-      - name: Checkout client
+      - name: Checkout client and trace script
         uses: actions/checkout@v4
         with:
           sparse-checkout: |
             EverPlanet
-          sparse-checkout-cone-mode: true
+            scripts/ci_cdb_trace.txt
+          sparse-checkout-cone-mode: false
           fetch-depth: 1
 
       - name: Locate CDB
@@ -52,30 +54,12 @@ jobs:
           $diag = Join-Path $env:RUNNER_TEMP 'cdb-trace'
           New-Item -ItemType Directory -Path $diag -Force | Out-Null
           $exe = Join-Path $PWD 'EverPlanet\EverPlanet_KR_v1842_U_DEVM.exe'
+          $commands = Join-Path $PWD 'scripts\ci_cdb_trace.txt'
           $log = Join-Path $diag 'cdb.txt'
-          $cmdFile = Join-Path $diag 'commands.txt'
           $cdb = '${{ steps.cdb.outputs.path }}'
 
-          # CDB is now the primary hosted-CI dynamic tracer. Frida workflows are
-          # intentionally kept out of automatic CI; their scripts remain available
-          # for local/manual reverse-engineering experiments.
-          @'
-.logopen /t "__LOG__"
-.symfix
-.echo [CDB_TRACE] script_loaded
-sxe -c ".echo [CDB_TRACE] nmcogame_loaded; lm m nmcogame; g" ld:nmcogame
-sxe -c ".echo [CDB_TRACE] nmconew_loaded; lm m nmconew; g" ld:nmconew
-sxe -c ".echo [CDB_TRACE] ws2_32_loaded; bu ws2_32!connect \".echo [CDB_TRACE] connect; .printf \\\"sockaddr=%p family=%04x port_be=%04x ip_be=%08x\\\\n\\\", poi(@esp+8), wo(poi(@esp+8)), wo(poi(@esp+8)+2), dwo(poi(@esp+8)+4); kb 8; g\"; g" ld:ws2_32
-sxe -c ".echo [CDB_TRACE] process_exit; ~* kb 6; lm; q" epr
-g
-'@.Replace('__LOG__', $log) | Set-Content -Path $cmdFile -Encoding ASCII
-
-          Write-Host "Launching CDB against: $exe"
-          Write-Host '--- debugger command file ---'
-          Get-Content $cmdFile
-
           try {
-            & $cdb -g -G -o -cf $cmdFile $exe
+            & $cdb -g -G -o -logo $log -cf $commands $exe
             $exit = $LASTEXITCODE
           } finally {
             Get-Process EverPlanet_KR_v1842_U_DEVM -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
@@ -92,11 +76,10 @@ g
             $nmconew = [bool](Select-String -Path $log -SimpleMatch '[CDB_TRACE] nmconew_loaded' -Quiet)
             $winsock = [bool](Select-String -Path $log -SimpleMatch '[CDB_TRACE] ws2_32_loaded' -Quiet)
             $connects = @(Select-String -Path $log -SimpleMatch '[CDB_TRACE] connect').Count
-
-            Write-Host '--- CDB trace highlights ---'
             Select-String -Path $log -Pattern 'CDB_TRACE|ModLoad|sockaddr=|exception|ERROR|WARNING' |
               Select-Object -First 300 | ForEach-Object { $_.Line }
           }
+
           "nmcogame_loaded=$($nmco.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "nmconew_loaded=$($nmconew.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "winsock_loaded=$($winsock.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
@@ -115,8 +98,8 @@ g
         if: always()
         shell: pwsh
         run: |
-          Write-Host "CDB exit:       ${{ steps.trace.outputs.cdb_exit }}"
-          Write-Host "nmcogame:       ${{ steps.trace.outputs.nmcogame_loaded }}"
-          Write-Host "nmconew:        ${{ steps.trace.outputs.nmconew_loaded }}"
-          Write-Host "ws2_32:         ${{ steps.trace.outputs.winsock_loaded }}"
-          Write-Host "connect calls:  ${{ steps.trace.outputs.connect_count }}"
+          Write-Host "CDB exit:      ${{ steps.trace.outputs.cdb_exit }}"
+          Write-Host "nmcogame:      ${{ steps.trace.outputs.nmcogame_loaded }}"
+          Write-Host "nmconew:       ${{ steps.trace.outputs.nmconew_loaded }}"
+          Write-Host "ws2_32:        ${{ steps.trace.outputs.winsock_loaded }}"
+          Write-Host "connect calls: ${{ steps.trace.outputs.connect_count }}"
