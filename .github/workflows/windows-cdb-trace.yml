@@ -17,7 +17,7 @@ permissions:
 jobs:
   cdb-trace:
     runs-on: windows-latest
-    timeout-minutes: 8
+    timeout-minutes: 6
 
     steps:
       - name: Checkout client
@@ -28,10 +28,9 @@ jobs:
           sparse-checkout-cone-mode: true
           fetch-depth: 1
 
-      - name: Locate or install CDB
+      - name: Locate CDB
         id: cdb
         shell: pwsh
-        timeout-minutes: 4
         run: |
           $ErrorActionPreference = 'Stop'
           $candidates = @(
@@ -39,16 +38,11 @@ jobs:
             'C:\Program Files\Windows Kits\10\Debuggers\x86\cdb.exe'
           )
           $cdb = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-          if (-not $cdb) {
-            Write-Host 'CDB not preinstalled; installing Windows SDK Debugging Tools via winget.'
-            winget install --id Microsoft.WindowsSDK.10.0.26100 --exact --silent --accept-package-agreements --accept-source-agreements --disable-interactivity
-            $cdb = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-          }
-          if (-not $cdb) { throw 'x86 cdb.exe was not found after SDK installation attempt.' }
+          if (-not $cdb) { throw 'x86 cdb.exe is not installed on this runner.' }
           Write-Host "CDB: $cdb"
           "path=$cdb" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
-      - name: Trace client headlessly with CDB
+      - name: Trace NMCO and Winsock connect
         id: trace
         shell: pwsh
         continue-on-error: true
@@ -59,23 +53,55 @@ jobs:
           New-Item -ItemType Directory -Path $diag -Force | Out-Null
           $exe = Join-Path $PWD 'EverPlanet\EverPlanet_KR_v1842_U_DEVM.exe'
           $log = Join-Path $diag 'cdb.txt'
+          $cmdFile = Join-Path $diag 'commands.txt'
           $cdb = '${{ steps.cdb.outputs.path }}'
 
-          # -g ignores the initial breakpoint. -G ignores the final breakpoint.
-          # sxe ld:nmcogame breaks if the legacy NMCO module is loaded.
-          # sxe epr breaks when the debuggee exits so the final stack/modules can be logged.
-          # The .sleep/q sequence bounds this first experiment even if the client remains alive.
-          $commands = '.logopen /t "' + $log + '"; .symfix; sxe ld:nmcogame; sxe epr; g; .sleep 30000; ~* k; lm; .logclose; q'
-          Write-Host "Launching CDB against: $exe"
-          & $cdb -g -G -o -logo $log -c $commands $exe
-          $exit = $LASTEXITCODE
-          "cdb_exit=$exit" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          Get-Process EverPlanet_KR_v1842_U_DEVM -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          # Event-driven debugger script. Module-load breakpoints install one-shot
+          # callbacks that log chronology and resume automatically. The connect
+          # breakpoint decodes sockaddr_in from the x86 stack and logs destination
+          # IPv4/port without modifying the client.
+          @'
+.logopen /t "__LOG__"
+.symfix
+.echo [CDB_TRACE] script_loaded
+sxe -c ".echo [CDB_TRACE] nmcogame_loaded; lm m nmcogame; g" ld:nmcogame
+sxe -c ".echo [CDB_TRACE] nmconew_loaded; lm m nmconew; g" ld:nmconew
+sxe -c ".echo [CDB_TRACE] ws2_32_loaded; bu ws2_32!connect \".echo [CDB_TRACE] connect; .printf \\\"sockaddr=%p family=%04x port_be=%04x ip_be=%08x\\\\n\\\", poi(@esp+8), wo(poi(@esp+8)), wo(poi(@esp+8)+2), dwo(poi(@esp+8)+4); kb 8; g\"; g" ld:ws2_32
+sxe -c ".echo [CDB_TRACE] process_exit; ~* kb 6; lm; q" epr
+g
+'@.Replace('__LOG__', $log) | Set-Content -Path $cmdFile -Encoding ASCII
 
-          Write-Host '--- CDB highlights ---'
-          if (Test-Path $log) {
-            Select-String -Path $log -Pattern 'nmcogame|ModLoad|exit|exception|EverPlanet|WARNING|ERROR' | Select-Object -First 250 | ForEach-Object { $_.Line }
+          Write-Host "Launching CDB against: $exe"
+          Write-Host '--- debugger command file ---'
+          Get-Content $cmdFile
+
+          try {
+            & $cdb -g -G -o -cf $cmdFile $exe
+            $exit = $LASTEXITCODE
+          } finally {
+            Get-Process EverPlanet_KR_v1842_U_DEVM -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            Get-Process cdb -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
           }
+          "cdb_exit=$exit" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+          $nmco = $false
+          $nmconew = $false
+          $winsock = $false
+          $connects = 0
+          if (Test-Path $log) {
+            $nmco = [bool](Select-String -Path $log -SimpleMatch '[CDB_TRACE] nmcogame_loaded' -Quiet)
+            $nmconew = [bool](Select-String -Path $log -SimpleMatch '[CDB_TRACE] nmconew_loaded' -Quiet)
+            $winsock = [bool](Select-String -Path $log -SimpleMatch '[CDB_TRACE] ws2_32_loaded' -Quiet)
+            $connects = @(Select-String -Path $log -SimpleMatch '[CDB_TRACE] connect').Count
+
+            Write-Host '--- CDB trace highlights ---'
+            Select-String -Path $log -Pattern 'CDB_TRACE|ModLoad|sockaddr=|exception|ERROR|WARNING' |
+              Select-Object -First 300 | ForEach-Object { $_.Line }
+          }
+          "nmcogame_loaded=$($nmco.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "nmconew_loaded=$($nmconew.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "winsock_loaded=$($winsock.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "connect_count=$connects" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
       - name: Upload CDB trace
         if: always()
@@ -90,4 +116,8 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          Write-Host "CDB exit: ${{ steps.trace.outputs.cdb_exit }}"
+          Write-Host "CDB exit:       ${{ steps.trace.outputs.cdb_exit }}"
+          Write-Host "nmcogame:       ${{ steps.trace.outputs.nmcogame_loaded }}"
+          Write-Host "nmconew:        ${{ steps.trace.outputs.nmconew_loaded }}"
+          Write-Host "ws2_32:         ${{ steps.trace.outputs.winsock_loaded }}"
+          Write-Host "connect calls:  ${{ steps.trace.outputs.connect_count }}"
