@@ -1,0 +1,52 @@
+name: Windows static wait disassembly
+
+on:
+  pull_request:
+    paths:
+      - 'EverPlanet/**'
+      - 'scripts/ci_disasm_addresses.py'
+      - '.github/workflows/windows-static-wait-disasm.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: everplanet-wait-disasm-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  disasm-wait-path:
+    runs-on: windows-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout PE and helper
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            EverPlanet
+            scripts
+          sparse-checkout-cone-mode: true
+          fetch-depth: 1
+
+      - name: Install disassembly dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check --quiet pefile capstone
+
+      - name: Disassemble observed wait stack addresses
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'wait-disassembly.txt'
+          python scripts\ci_disasm_addresses.py `
+            EverPlanet\EverPlanet_KR_v1842_U_DEVM.exe `
+            0xAFB1C0 0xAFB1C7 0xAFB10A 0xCA8D1C 0xAF5B23 0xC2BBD9 0xAD98B4 0x7501B8 `
+            | Tee-Object -FilePath $out
+
+      - name: Upload disassembly
+        uses: actions/upload-artifact@v4
+        with:
+          name: everplanet-wait-path-disassembly
+          path: ${{ runner.temp }}/wait-disassembly.txt
+          retention-days: 7
