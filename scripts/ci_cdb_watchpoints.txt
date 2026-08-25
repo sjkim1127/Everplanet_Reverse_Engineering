@@ -1,0 +1,7 @@
+.echo [CDB_TRACE] installing_object_watchpoints
+ba r4 ${WatchObj}+0x1c ".echo [CDB_TRACE] state_read; .printf \"tid=%x eip=%p obj=%p state=%u arg20=%08x result24=%08x\\n\", @$tid, @eip, ${WatchObj}, poi(${WatchObj}+0x1c), poi(${WatchObj}+0x20), poi(${WatchObj}+0x24); r; kb 24; u @eip-0x20 L48; g"
+ba w4 ${WatchObj}+0x24 ".echo [CDB_TRACE] result_write; .printf \"tid=%x eip=%p obj=%p state=%u arg20=%08x old_result24=%08x\\n\", @$tid, @eip, ${WatchObj}, poi(${WatchObj}+0x1c), poi(${WatchObj}+0x20), poi(${WatchObj}+0x24); r; kb 24; u @eip-0x20 L48; g"
+bp /1 ${WatchRet} ".echo [CDB_TRACE] helper_7e75c0_return; .printf \"ret=%08x obj=%p state=%u result24=%08x\\n\", @eax, ${WatchObj}, poi(${WatchObj}+0x1c), poi(${WatchObj}+0x24); g"
+kb 16
+u @eip L64
+g
