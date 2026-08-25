@@ -4,10 +4,17 @@ on:
   pull_request:
     paths:
       - 'EverPlanet/**'
-      - 'frida/**'
-      - 'scripts/**'
+      - 'frida/hook_force_login.js'
+      - 'frida/hook_ci_headless.js'
+      - 'frida/ci_thread_sampler.js'
+      - 'scripts/ci_frida_spawn_probe.py'
+      - 'scripts/requirements-ci.txt'
       - '.github/workflows/windows-client-thread-trace.yml'
   workflow_dispatch:
+
+concurrency:
+  group: everplanet-thread-trace-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
