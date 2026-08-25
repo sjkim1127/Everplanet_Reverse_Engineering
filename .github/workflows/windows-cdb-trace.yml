@@ -7,11 +7,13 @@ on:
     paths:
       - 'EverPlanet/**'
       - 'scripts/ci_cdb_trace.txt'
+      - 'scripts/ci_cdb_watchpoints.txt'
       - '.github/workflows/windows-cdb-trace.yml'
   pull_request:
     paths:
       - 'EverPlanet/**'
       - 'scripts/ci_cdb_trace.txt'
+      - 'scripts/ci_cdb_watchpoints.txt'
       - '.github/workflows/windows-cdb-trace.yml'
   workflow_dispatch:
 
@@ -28,12 +30,13 @@ jobs:
     timeout-minutes: 6
 
     steps:
-      - name: Checkout client and trace script
+      - name: Checkout client and trace scripts
         uses: actions/checkout@v4
         with:
           sparse-checkout: |
             EverPlanet
             scripts/ci_cdb_trace.txt
+            scripts/ci_cdb_watchpoints.txt
           sparse-checkout-cone-mode: false
           fetch-depth: 1
 
@@ -66,8 +69,6 @@ jobs:
           $cdb = '${{ steps.cdb.outputs.path }}'
 
           try {
-            # Do not use -g here: the trace script must run at the initial
-            # breakpoint, before ws2_32/nmcogame/nmconew have a chance to load.
             & $cdb -G -o -logo $log -cf $commands $exe
             $exit = $LASTEXITCODE
           } finally {
@@ -83,10 +84,10 @@ jobs:
           if (Test-Path $log) {
             $nmco = [bool](Select-String -Path $log -SimpleMatch '[CDB_TRACE] nmcogame_loaded' -Quiet)
             $nmconew = [bool](Select-String -Path $log -SimpleMatch '[CDB_TRACE] nmconew_loaded' -Quiet)
-            $winsock = [bool](Select-String -Path $log -SimpleMatch '[CDB_TRACE] ws2_32_loaded' -Quiet)
-            $connects = @(Select-String -Path $log -SimpleMatch '[CDB_TRACE] connect').Count
-            Select-String -Path $log -Pattern 'CDB_TRACE|ModLoad|sockaddr=|exception|ERROR|WARNING' |
-              Select-Object -First 300 | ForEach-Object { $_.Line }
+            $winsock = [bool](Select-String -Path $log -SimpleMatch 'ws2_32.dll' -Quiet)
+            $connects = @(Select-String -Path $log -SimpleMatch '[CDB_TRACE] connect_enter').Count
+            Select-String -Path $log -Pattern 'CDB_TRACE|ModLoad|sockaddr=|exception|ERROR|WARNING|Command file' |
+              Select-Object -First 400 | ForEach-Object { $_.Line }
           }
 
           "nmcogame_loaded=$($nmco.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
