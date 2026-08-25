@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
-"""Spawn EverPlanet suspended with Frida, load hooks, then observe it for CI."""
+"""Spawn EverPlanet suspended with Frida, load hooks, then observe it for CI.
+
+CI cleanup intentionally avoids synchronous script unload/session detach calls: with
+this legacy client those Frida operations can block indefinitely after observation.
+The target process is terminated first and the short-lived probe process then exits,
+letting the OS tear down the local Frida session.
+"""
 
 from __future__ import annotations
 
 import argparse
+import os
 import pathlib
 import sys
 import time
@@ -83,22 +90,26 @@ def main() -> int:
         print(f"[ci-frida] fatal: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
         return 1
     finally:
-        for script in reversed(scripts):
-            try:
-                script.unload()
-            except Exception:
-                pass
-        if session is not None:
-            try:
-                session.detach()
-            except Exception:
-                pass
+        # Do not call script.unload() or session.detach() here. Both are synchronous
+        # RPCs and have hung indefinitely with this client on GitHub-hosted Windows.
+        # Killing the inferior first is sufficient for this disposable CI probe.
         if pid is not None:
             try:
+                print(f"[ci-frida] killing target pid={pid}", file=sys.stderr, flush=True)
                 device.kill(pid)
-            except Exception:
-                pass
+                print("[ci-frida] target kill requested", file=sys.stderr, flush=True)
+            except Exception as exc:
+                print(f"[ci-frida] target kill failed: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+
+        # Frida teardown itself may still block during Python interpreter shutdown.
+        # Flush captured diagnostics and terminate the disposable probe process
+        # without waiting for extension-module destructors.
+        try:
+            sys.stdout.flush()
+            sys.stderr.flush()
+        finally:
+            os._exit(0)
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    main()
