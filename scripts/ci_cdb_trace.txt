@@ -1,7 +1,7 @@
 .symfix
 .echo [CDB_TRACE] script_loaded
 .echo [CDB_TRACE] installing_connect_breakpoint
-bp ws2_32!connect ".echo [CDB_TRACE] connect_enter; .printf \"sockaddr=%p family=%u port=%u ip=%u.%u.%u.%u ret=%p\\n\", poi(@esp+8), wo(poi(@esp+8)), (wo(poi(@esp+8)+2)>>8)+((wo(poi(@esp+8)+2)&0xff)<<8), by(poi(@esp+8)+4), by(poi(@esp+8)+5), by(poi(@esp+8)+6), by(poi(@esp+8)+7), poi(@esp); bp /1 poi(@esp) \".echo [CDB_TRACE] connect_return; .printf \\\"result=%d eax=%08x\\\\n\\\", @eax, @eax; .if (@eax != 0) { .echo [CDB_TRACE] connect_failed; r @$t0 = @eax; .call ws2_32!WSAGetLastError(); .printf \\\"wsa_error=%u\\\\n\\\", @eax; r @eax = @$t0; } .else { .echo [CDB_TRACE] connect_succeeded; }; kb 12; g\"; kb 12; g"
+bp ws2_32!connect ".echo [CDB_TRACE] connect_enter; .printf \"sockaddr=%p family=%u port=%u ip=%u.%u.%u.%u ret=%p\\n\", poi(@esp+8), wo(poi(@esp+8)), (wo(poi(@esp+8)+2)>>8)+((wo(poi(@esp+8)+2)&0xff)<<8), by(poi(@esp+8)+4), by(poi(@esp+8)+5), by(poi(@esp+8)+6), by(poi(@esp+8)+7), poi(@esp); bp /1 poi(@esp) \".echo [CDB_TRACE] connect_return; .printf \\\"result=%d eax=%08x ecx=%08x edx=%08x\\\\n\\\", @eax, @eax, @ecx, @edx; .if (@eax != 0) { .echo [CDB_TRACE] connect_failed; .echo [CDB_TRACE] native_failure_path; u @eip L30; } .else { .echo [CDB_TRACE] connect_succeeded; }; kb 12; g\"; kb 12; g"
 sxe -c ".echo [CDB_TRACE] nmcogame_loaded; lm m nmcogame; g" ld:nmcogame
 sxe -c ".echo [CDB_TRACE] nmconew_loaded; lm m nmconew; g" ld:nmconew
 sxe -c ".echo [CDB_TRACE] process_exit; ~* kb 8; lm; q" epr
