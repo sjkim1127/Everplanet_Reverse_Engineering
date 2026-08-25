@@ -1,8 +1,8 @@
 .symfix
 .echo [CDB_TRACE] script_loaded
 .echo [CDB_TRACE] installing_connect_breakpoint
-bp ws2_32!connect ".echo [CDB_TRACE] connect; .printf \"sockaddr=%p family=%04x port_be=%04x ip_be=%08x\\n\", poi(@esp+8), wo(poi(@esp+8)), wo(poi(@esp+8)+2), dwo(poi(@esp+8)+4); kb 8; g"
+bp ws2_32!connect ".echo [CDB_TRACE] connect; .printf \"sockaddr=%p family=%u port=%u ip=%u.%u.%u.%u\\n\", poi(@esp+8), wo(poi(@esp+8)), (wo(poi(@esp+8)+2)>>8)+((wo(poi(@esp+8)+2)&0xff)<<8), by(poi(@esp+8)+4), by(poi(@esp+8)+5), by(poi(@esp+8)+6), by(poi(@esp+8)+7); kb 12; g"
 sxe -c ".echo [CDB_TRACE] nmcogame_loaded; lm m nmcogame; g" ld:nmcogame
 sxe -c ".echo [CDB_TRACE] nmconew_loaded; lm m nmconew; g" ld:nmconew
-sxe -c ".echo [CDB_TRACE] process_exit; ~* kb 6; lm; q" epr
+sxe -c ".echo [CDB_TRACE] process_exit; ~* kb 8; lm; q" epr
 g
