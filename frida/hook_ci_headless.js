@@ -1,11 +1,12 @@
 // CI-only startup instrumentation for headless GitHub Actions runs.
 // Logs DLL loads/window creation, dismisses hidden MessageBox dialogs,
-// and records early blocking wait call stacks.
+// and correlates blocking waits with named synchronization objects.
 
 (function () {
   const PREFIX = "[ci-headless]";
   let waitTraces = 0;
-  const MAX_WAIT_TRACES = 16;
+  const MAX_WAIT_TRACES = 24;
+  const handles = new Map();
 
   function log(msg) {
     console.log(PREFIX + " " + msg);
@@ -19,11 +20,43 @@
     try { return p.isNull() ? "" : p.readUtf16String(); } catch (_) { return "<unreadable>"; }
   }
 
+  function handleKey(h) {
+    try { return h.toString(); } catch (_) { return "<?>"; }
+  }
+
+  function rememberHandle(h, kind, name) {
+    if (!h || h.isNull()) return;
+    const key = handleKey(h);
+    const label = kind + (name ? ":" + name : "");
+    handles.set(key, label);
+    log("HANDLE " + key + " = " + label);
+  }
+
+  function describeHandle(h) {
+    const key = handleKey(h);
+    return key + (handles.has(key) ? "[" + handles.get(key) + "]" : "");
+  }
+
+  function formatAddress(addr) {
+    try {
+      const mod = Process.findModuleByAddress(addr);
+      if (mod) {
+        const off = addr.sub(mod.base);
+        const sym = DebugSymbol.fromAddress(addr);
+        const symText = sym && sym.name ? " " + sym.name : "";
+        return mod.name + "+" + off + symText;
+      }
+      return addr.toString();
+    } catch (_) {
+      return addr.toString();
+    }
+  }
+
   function formatBacktrace(context) {
     try {
       return Thread.backtrace(context, Backtracer.FUZZY)
-        .slice(0, 12)
-        .map(DebugSymbol.fromAddress)
+        .slice(0, 14)
+        .map(formatAddress)
         .join(" <- ");
     } catch (e) {
       return "<backtrace failed: " + e + ">";
@@ -61,10 +94,56 @@
     attach("LoadLibraryExW", true);
   }
 
+  function hookSyncObjects() {
+    const kernel32 = Process.getModuleByName("kernel32.dll");
+
+    function hookCreate(name, wide, nameIndex, kind) {
+      try {
+        const addr = kernel32.getExportByName(name);
+        Interceptor.attach(addr, {
+          onEnter(args) {
+            this.objectName = wide ? readWide(args[nameIndex]) : readAnsi(args[nameIndex]);
+          },
+          onLeave(retval) {
+            rememberHandle(retval, kind, this.objectName);
+          }
+        });
+      } catch (e) {
+        log("hook " + name + " failed: " + e);
+      }
+    }
+
+    hookCreate("CreateEventA", false, 3, "event");
+    hookCreate("CreateEventW", true, 3, "event");
+    hookCreate("OpenEventA", false, 2, "event-open");
+    hookCreate("OpenEventW", true, 2, "event-open");
+    hookCreate("CreateMutexA", false, 2, "mutex");
+    hookCreate("CreateMutexW", true, 2, "mutex");
+    hookCreate("OpenMutexA", false, 2, "mutex-open");
+    hookCreate("OpenMutexW", true, 2, "mutex-open");
+    hookCreate("CreateSemaphoreA", false, 3, "semaphore");
+    hookCreate("CreateSemaphoreW", true, 3, "semaphore");
+    hookCreate("OpenSemaphoreA", false, 2, "semaphore-open");
+    hookCreate("OpenSemaphoreW", true, 2, "semaphore-open");
+
+    for (const name of ["SetEvent", "ResetEvent", "ReleaseMutex"]) {
+      try {
+        const addr = kernel32.getExportByName(name);
+        Interceptor.attach(addr, {
+          onEnter(args) {
+            log(name + " handle=" + describeHandle(args[0]));
+          }
+        });
+      } catch (e) {
+        log("hook " + name + " failed: " + e);
+      }
+    }
+  }
+
   function hookKernelWaits() {
     const kernel32 = Process.getModuleByName("kernel32.dll");
 
-    function traceWait(name, timeoutIndex) {
+    function traceSingle(name, timeoutIndex) {
       try {
         const addr = kernel32.getExportByName(name);
         Interceptor.attach(addr, {
@@ -73,7 +152,7 @@
             const timeout = args[timeoutIndex].toUInt32();
             if (timeout !== 0xffffffff && timeout < 5000) return;
             waitTraces++;
-            log(name + " timeout=" + timeout + " stack=" + formatBacktrace(this.context));
+            log(name + " handle=" + describeHandle(args[0]) + " timeout=" + timeout + " stack=" + formatBacktrace(this.context));
           }
         });
       } catch (e) {
@@ -81,10 +160,35 @@
       }
     }
 
-    traceWait("WaitForSingleObject", 1);
-    traceWait("WaitForSingleObjectEx", 1);
-    traceWait("WaitForMultipleObjects", 3);
-    traceWait("WaitForMultipleObjectsEx", 3);
+    function traceMultiple(name, timeoutIndex) {
+      try {
+        const addr = kernel32.getExportByName(name);
+        Interceptor.attach(addr, {
+          onEnter(args) {
+            if (waitTraces >= MAX_WAIT_TRACES) return;
+            const timeout = args[timeoutIndex].toUInt32();
+            if (timeout !== 0xffffffff && timeout < 5000) return;
+            waitTraces++;
+            const count = Math.min(args[0].toUInt32(), 8);
+            const base = args[1];
+            const list = [];
+            try {
+              for (let i = 0; i < count; i++) {
+                list.push(describeHandle(base.add(i * Process.pointerSize).readPointer()));
+              }
+            } catch (_) {}
+            log(name + " handles=" + JSON.stringify(list) + " timeout=" + timeout + " stack=" + formatBacktrace(this.context));
+          }
+        });
+      } catch (e) {
+        log("hook " + name + " failed: " + e);
+      }
+    }
+
+    traceSingle("WaitForSingleObject", 1);
+    traceSingle("WaitForSingleObjectEx", 1);
+    traceMultiple("WaitForMultipleObjects", 3);
+    traceMultiple("WaitForMultipleObjectsEx", 3);
   }
 
   function installUser32Hooks() {
@@ -106,13 +210,11 @@
           const body = wide ? readWide(text) : readAnsi(text);
           const title = wide ? readWide(caption) : readAnsi(caption);
           log(name + " AUTO-DISMISS title=" + JSON.stringify(title) + " text=" + JSON.stringify(body) + " type=0x" + type.toString(16));
-          return 1; // IDOK
+          return 1;
         }, "int", argTypes));
         log(name + " auto-dismiss installed");
       } catch (e) {
-        if (!String(e).includes("already replaced")) {
-          log("hook " + name + " failed: " + e);
-        }
+        if (!String(e).includes("already replaced")) log("hook " + name + " failed: " + e);
       }
     }
 
@@ -164,9 +266,8 @@
 
   log("installing CI headless startup hooks");
   hookLoaders();
+  hookSyncObjects();
   hookKernelWaits();
   installUser32Hooks();
-  setTimeout(function () {
-    installUser32Hooks();
-  }, 1000);
+  setTimeout(function () { installUser32Hooks(); }, 1000);
 })();
