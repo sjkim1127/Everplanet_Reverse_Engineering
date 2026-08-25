@@ -61,12 +61,7 @@ jobs:
           Write-Host "Launching $exe on GitHub-hosted Windows runner..."
 
           try {
-            $p = Start-Process \
-              -FilePath $exe \
-              -WorkingDirectory $gameDir \
-              -PassThru \
-              -RedirectStandardOutput $stdout \
-              -RedirectStandardError $stderr
+            $p = Start-Process -FilePath $exe -WorkingDirectory $gameDir -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
           } catch {
             Write-Host "Start-Process failed: $($_.Exception.Message)"
             "launch_state=start_failed" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
