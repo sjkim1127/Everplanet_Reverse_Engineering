@@ -121,7 +121,7 @@ jobs:
                       $buf = New-Object byte[] 512
                       $n = $stream.Read($buf, 0, $buf.Length)
                       if ($n -gt 0) {
-                        $hex = ([BitConverter]]::ToString($buf, 0, $n)).Replace('-', '')
+                        $hex = ([BitConverter]::ToString($buf, 0, $n)).Replace('-', '')
                         Add-Content $LogPath "DATA $Port $n bytes $hex"
                       }
                     }
