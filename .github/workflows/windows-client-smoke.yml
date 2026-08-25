@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'EverPlanet/**'
+      - 'frida/**'
       - 'scripts/**'
       - '.github/workflows/windows-client-smoke.yml'
   workflow_dispatch:
@@ -22,6 +23,7 @@ jobs:
         with:
           sparse-checkout: |
             EverPlanet
+            frida
             scripts
           sparse-checkout-cone-mode: true
           fetch-depth: 1
@@ -31,21 +33,11 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $exe = Join-Path $PWD 'EverPlanet\EverPlanet_KR_v1842_U_DEVM.exe'
-          if (-not (Test-Path $exe)) {
-            throw "Client executable not found: $exe"
-          }
-
+          if (-not (Test-Path $exe)) { throw "Client executable not found: $exe" }
           $item = Get-Item $exe
           Write-Host "Client: $($item.FullName)"
           Write-Host "Size:   $($item.Length) bytes"
           Write-Host "SHA256: $((Get-FileHash $exe -Algorithm SHA256).Hash)"
-
-          Write-Host 'Nearby runtime files:'
-          Get-ChildItem (Split-Path $exe) -File |
-            Where-Object { $_.Extension -in '.dll', '.exe', '.dat', '.pin' } |
-            Sort-Object Name |
-            Select-Object Name, Length |
-            Format-Table -AutoSize
 
       - name: Attempt GUI client launch
         id: launch
@@ -55,44 +47,111 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $gameDir = Join-Path $PWD 'EverPlanet'
           $exe = Join-Path $gameDir 'EverPlanet_KR_v1842_U_DEVM.exe'
-          $stdout = Join-Path $env:RUNNER_TEMP 'everplanet-stdout.txt'
-          $stderr = Join-Path $env:RUNNER_TEMP 'everplanet-stderr.txt'
-
-          Write-Host "Launching $exe on GitHub-hosted Windows runner..."
-
           try {
-            $p = Start-Process -FilePath $exe -WorkingDirectory $gameDir -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+            $p = Start-Process -FilePath $exe -WorkingDirectory $gameDir -PassThru
           } catch {
-            Write-Host "Start-Process failed: $($_.Exception.Message)"
             "launch_state=start_failed" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-            exit 1
+            throw
           }
-
           "pid=$($p.Id)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          Write-Host "PID: $($p.Id)"
-
           Start-Sleep -Seconds 15
           $p.Refresh()
-
           if ($p.HasExited) {
-            Write-Host "Client exited during smoke window. ExitCode=$($p.ExitCode)"
             "launch_state=exited" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
             "exit_code=$($p.ExitCode)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           } else {
-            Write-Host 'Client remained alive for 15 seconds.'
             "launch_state=alive" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-
-            Get-Process -Id $p.Id |
-              Select-Object Id, ProcessName, CPU, WorkingSet64, Responding, StartTime |
-              Format-List
-
+            Write-Host "Client remained alive for 15 seconds. PID=$($p.Id) Responding=$($p.Responding)"
             Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
           }
 
-          Write-Host '--- stdout ---'
-          if (Test-Path $stdout) { Get-Content $stdout -ErrorAction SilentlyContinue }
-          Write-Host '--- stderr ---'
-          if (Test-Path $stderr) { Get-Content $stderr -ErrorAction SilentlyContinue }
+      - name: Install Frida tools
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check --quiet frida-tools
+          frida --version
+
+      - name: Probe redirected client connections
+        id: network
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $diag = Join-Path $env:RUNNER_TEMP 'diagnostics'
+          New-Item -ItemType Directory -Path $diag -Force | Out-Null
+          $listenerLog = Join-Path $diag 'listeners.txt'
+          $fridaOut = Join-Path $diag 'frida-stdout.txt'
+          $fridaErr = Join-Path $diag 'frida-stderr.txt'
+          $gameDir = Join-Path $PWD 'EverPlanet'
+          $exe = Join-Path $gameDir 'EverPlanet_KR_v1842_U_DEVM.exe'
+          $hook = Join-Path $PWD 'frida\hook_force_login.js'
+
+          $listenerBlock = {
+            param($Port, $LogPath)
+            $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, $Port)
+            $listener.Start()
+            Add-Content $LogPath "LISTEN $Port"
+            $deadline = [DateTime]::UtcNow.AddSeconds(30)
+            try {
+              while ([DateTime]::UtcNow -lt $deadline) {
+                if ($listener.Pending()) {
+                  $client = $listener.AcceptTcpClient()
+                  Add-Content $LogPath "ACCEPT $Port from $($client.Client.RemoteEndPoint)"
+                  $client.ReceiveTimeout = 1000
+                  try {
+                    $stream = $client.GetStream()
+                    Start-Sleep -Milliseconds 250
+                    if ($stream.DataAvailable) {
+                      $buf = New-Object byte[] 512
+                      $n = $stream.Read($buf, 0, $buf.Length)
+                      if ($n -gt 0) {
+                        $hex = ([BitConverter]::ToString($buf, 0, $n)).Replace('-', '')
+                        Add-Content $LogPath "DATA $Port $n bytes $hex"
+                      }
+                    }
+                  } catch {}
+                  Start-Sleep -Seconds 2
+                  $client.Close()
+                }
+                Start-Sleep -Milliseconds 100
+              }
+            } finally {
+              $listener.Stop()
+            }
+          }
+
+          $jobs = @()
+          foreach ($port in @(3431, 3432, 47611)) {
+            $jobs += Start-Job -ScriptBlock $listenerBlock -ArgumentList $port, $listenerLog
+          }
+          Start-Sleep -Seconds 1
+
+          $game = Start-Process -FilePath $exe -WorkingDirectory $gameDir -PassThru
+          Write-Host "Game PID=$($game.Id)"
+          Start-Sleep -Milliseconds 500
+
+          $frida = Start-Process -FilePath 'frida' -ArgumentList @('-p', "$($game.Id)", '-l', $hook) -PassThru -RedirectStandardOutput $fridaOut -RedirectStandardError $fridaErr
+          Write-Host "Frida PID=$($frida.Id)"
+          Start-Sleep -Seconds 25
+
+          Stop-Process -Id $frida.Id -Force -ErrorAction SilentlyContinue
+          Stop-Process -Id $game.Id -Force -ErrorAction SilentlyContinue
+          $jobs | Stop-Job -ErrorAction SilentlyContinue
+          $jobs | Receive-Job -ErrorAction SilentlyContinue | Out-Null
+          $jobs | Remove-Job -Force -ErrorAction SilentlyContinue
+
+          Write-Host '--- listener log ---'
+          if (Test-Path $listenerLog) { Get-Content $listenerLog }
+          Write-Host '--- Frida connect lines ---'
+          if (Test-Path $fridaOut) { Select-String -Path $fridaOut -Pattern '\[connect\]|Force Login|Ws2_32|error' | ForEach-Object { $_.Line } }
+          if (Test-Path $fridaErr) { Get-Content $fridaErr }
+
+          $accepted = $false
+          if (Test-Path $listenerLog) {
+            $accepted = [bool](Select-String -Path $listenerLog -Pattern '^ACCEPT ' -Quiet)
+          }
+          "tcp_accept=$($accepted.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "TCP accept observed: $accepted"
 
       - name: Capture Windows diagnostics
         if: always()
@@ -100,25 +159,9 @@ jobs:
         run: |
           $out = Join-Path $env:RUNNER_TEMP 'diagnostics'
           New-Item -ItemType Directory -Path $out -Force | Out-Null
-
-          Get-CimInstance Win32_OperatingSystem |
-            Format-List Caption, Version, BuildNumber, OSArchitecture |
-            Out-File (Join-Path $out 'os.txt')
-
-          Get-CimInstance Win32_VideoController |
-            Format-List Name, DriverVersion, AdapterRAM, VideoModeDescription |
-            Out-File (Join-Path $out 'video.txt')
-
-          Get-Process |
-            Sort-Object ProcessName |
-            Select-Object Id, ProcessName, CPU, WorkingSet64 |
-            Format-Table -AutoSize |
-            Out-File (Join-Path $out 'processes.txt')
-
-          $stdout = Join-Path $env:RUNNER_TEMP 'everplanet-stdout.txt'
-          $stderr = Join-Path $env:RUNNER_TEMP 'everplanet-stderr.txt'
-          if (Test-Path $stdout) { Copy-Item $stdout $out }
-          if (Test-Path $stderr) { Copy-Item $stderr $out }
+          Get-CimInstance Win32_OperatingSystem | Format-List Caption, Version, BuildNumber, OSArchitecture | Out-File (Join-Path $out 'os.txt')
+          Get-CimInstance Win32_VideoController | Format-List Name, DriverVersion, AdapterRAM, VideoModeDescription | Out-File (Join-Path $out 'video.txt')
+          Get-Process | Sort-Object ProcessName | Select-Object Id, ProcessName, CPU, WorkingSet64 | Format-Table -AutoSize | Out-File (Join-Path $out 'processes.txt')
 
       - name: Upload diagnostics
         if: always()
@@ -134,13 +177,9 @@ jobs:
         shell: pwsh
         run: |
           Write-Host "Launch state: ${{ steps.launch.outputs.launch_state }}"
-          Write-Host "PID:          ${{ steps.launch.outputs.pid }}"
-          Write-Host "Exit code:    ${{ steps.launch.outputs.exit_code }}"
-
-          if ('${{ steps.launch.outputs.launch_state }}' -eq 'alive') {
-            Write-Host 'Hosted-runner result: the GUI client can at least start and remain alive for the smoke window.'
-          } elseif ('${{ steps.launch.outputs.launch_state }}' -eq 'exited') {
-            Write-Host 'Hosted-runner result: the process starts but exits early; inspect the diagnostics artifact.'
+          Write-Host "TCP accept:   ${{ steps.network.outputs.tcp_accept }}"
+          if ('${{ steps.network.outputs.tcp_accept }}' -eq 'true') {
+            Write-Host 'Hosted-runner result: Frida redirection reached a local EverPlanet listener.'
           } else {
-            Write-Host 'Hosted-runner result: the executable could not be launched; inspect the failed step and diagnostics.'
+            Write-Host 'No local TCP accept observed yet; inspect Frida/listener diagnostics.'
           }
