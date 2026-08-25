@@ -86,6 +86,7 @@ jobs:
           $gameDir = Join-Path $PWD 'EverPlanet'
           $exe = Join-Path $gameDir 'EverPlanet_KR_v1842_U_DEVM.exe'
           $hook = Join-Path $PWD 'frida\hook_force_login.js'
+          $headlessHook = Join-Path $PWD 'frida\hook_ci_headless.js'
           $probe = Join-Path $PWD 'scripts\ci_frida_spawn_probe.py'
 
           $listenerBlock = {
@@ -129,7 +130,7 @@ jobs:
           Start-Sleep -Seconds 1
 
           Write-Host 'Spawning client suspended through the Frida Python API...'
-          & python $probe --exe $exe --script $hook --duration 25 1> $fridaOut 2> $fridaErr
+          & python $probe --exe $exe --script $hook --script $headlessHook --duration 25 1> $fridaOut 2> $fridaErr
           $probeExit = $LASTEXITCODE
           "frida_exit_code=$probeExit" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
