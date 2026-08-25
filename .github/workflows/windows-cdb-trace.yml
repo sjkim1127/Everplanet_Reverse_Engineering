@@ -59,7 +59,9 @@ jobs:
           $cdb = '${{ steps.cdb.outputs.path }}'
 
           try {
-            & $cdb -g -G -o -logo $log -cf $commands $exe
+            # Do not use -g here: the trace script must run at the initial
+            # breakpoint, before ws2_32/nmcogame/nmconew have a chance to load.
+            & $cdb -G -o -logo $log -cf $commands $exe
             $exit = $LASTEXITCODE
           } finally {
             Get-Process EverPlanet_KR_v1842_U_DEVM -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
