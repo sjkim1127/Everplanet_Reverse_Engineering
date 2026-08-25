@@ -6,13 +6,19 @@ ln poi(0x00cf4458)
 ln poi(0x00cf4444)
 ln poi(0x00cf4448)
 
+.echo [CDB_TRACE] state2_import_targets
+.printf "iat_8f4228=%p iat_8f422c=%p iat_8f4158=%p iat_8f4224=%p\n", poi(0x00cf4228), poi(0x00cf422c), poi(0x00cf4158), poi(0x00cf4224)
+ln poi(0x00cf4228)
+ln poi(0x00cf422c)
+ln poi(0x00cf4158)
+ln poi(0x00cf4224)
+
 .echo [CDB_TRACE] installing_connect_breakpoint
-bp ws2_32!connect ".echo [CDB_TRACE] connect_enter; .printf \"sockaddr=%p family=%u port=%u ip=%u.%u.%u.%u ret=%p\\n\", poi(@esp+8), wo(poi(@esp+8)), (wo(poi(@esp+8)+2)>>8)+((wo(poi(@esp+8)+2)&0xff)<<8), by(poi(@esp+8)+4), by(poi(@esp+8)+5), by(poi(@esp+8)+6), by(poi(@esp+8)+7), poi(@esp); bp /1 poi(@esp) \".echo [CDB_TRACE] connect_return; .printf \\\"result=%d eax=%08x ecx=%08x edx=%08x\\\\n\\\", @eax, @eax, @ecx, @edx; .if (@eax != 0) { .echo [CDB_TRACE] connect_failed; .printf \\\"conn_obj=%p socket=%08x aux14=%08x error18=%u state1c=%u\\\\n\\\", @edi, poi(@edi+0x10), poi(@edi+0x14), poi(@edi+0x18), poi(@edi+0x1c); u @eip L32; } .else { .echo [CDB_TRACE] connect_succeeded; }; kb 12; g\"; kb 12; g"
+bp ws2_32!connect ".echo [CDB_TRACE] connect_enter; .printf \"sockaddr=%p family=%u port=%u ip=%u.%u.%u.%u ret=%p\\n\", poi(@esp+8), wo(poi(@esp+8)), (wo(poi(@esp+8)+2)>>8)+((wo(poi(@esp+8)+2)&0xff)<<8), by(poi(@esp+8)+4), by(poi(@esp+8)+5), by(poi(@esp+8)+6), by(poi(@esp+8)+7), poi(@esp); bp /1 poi(@esp) \".echo [CDB_TRACE] connect_return; .printf \\\"result=%d eax=%08x ecx=%08x edx=%08x\\\\n\\\", @eax, @eax, @ecx, @edx; .if (@eax != 0) { .echo [CDB_TRACE] connect_failed; .printf \\\"conn_obj=%p socket=%08x event14=%08x error18=%u state1c=%u\\\\n\\\", @edi, poi(@edi+0x10), poi(@edi+0x14), poi(@edi+0x18), poi(@edi+0x1c); u @eip L32; } .else { .echo [CDB_TRACE] connect_succeeded; }; kb 12; g\"; kb 12; g"
 
 .echo [CDB_TRACE] probing_connection_helpers
-bp 0x00be6970 ".echo [CDB_TRACE] helper_7e6970; .printf \"obj=%p socket=%08x aux14=%08x error18=%u state1c=%u\\n\", @esi, poi(@esi+0x10), poi(@esi+0x14), poi(@esi+0x18), poi(@esi+0x1c); kb 12; u @eip L32; g"
-bp 0x00be75c0 ".echo [CDB_TRACE] helper_7e75c0; .printf \"arg_obj=%p socket=%08x aux14=%08x error18=%u state1c=%u\\n\", poi(@esp+4), poi(poi(@esp+4)+0x10), poi(poi(@esp+4)+0x14), poi(poi(@esp+4)+0x18), poi(poi(@esp+4)+0x1c); kb 12; u @eip L32; g"
-bp 0x00be8400 ".echo [CDB_TRACE] helper_7e8400; .printf \"obj=%p socket=%08x aux14=%08x error18=%u state1c=%u\\n\", @esi, poi(@esi+0x10), poi(@esi+0x14), poi(@esi+0x18), poi(@esi+0x1c); kb 12; u @eip L32; g"
+bp 0x00be75c0 ".echo [CDB_TRACE] helper_7e75c0_enter; .printf \"arg_obj=%p socket=%08x event14=%08x error18=%u state1c=%u\\n\", poi(@esp+4), poi(poi(@esp+4)+0x10), poi(poi(@esp+4)+0x14), poi(poi(@esp+4)+0x18), poi(poi(@esp+4)+0x1c); kb 16; u @eip L64; bp /1 poi(@esp) \".echo [CDB_TRACE] helper_7e75c0_return; .printf \\\"ret=%08x\\\\n\\\", @eax; g\"; g"
+bp 0x00be8400 ".echo [CDB_TRACE] helper_7e8400; .printf \"obj=%p socket=%08x event14=%08x error18=%u state1c=%u\\n\", @esi, poi(@esi+0x10), poi(@esi+0x14), poi(@esi+0x18), poi(@esi+0x1c); kb 12; u @eip L32; g"
 
 sxe -c ".echo [CDB_TRACE] nmcogame_loaded; lm m nmcogame; g" ld:nmcogame
 sxe -c ".echo [CDB_TRACE] nmconew_loaded; lm m nmconew; g" ld:nmconew
