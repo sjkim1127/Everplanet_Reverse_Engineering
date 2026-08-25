@@ -1,8 +1,11 @@
 // CI-only startup instrumentation for headless GitHub Actions runs.
-// Logs DLL loads/window creation and auto-dismisses hidden MessageBox dialogs.
+// Logs DLL loads/window creation, dismisses hidden MessageBox dialogs,
+// and records early blocking wait call stacks.
 
 (function () {
   const PREFIX = "[ci-headless]";
+  let waitTraces = 0;
+  const MAX_WAIT_TRACES = 16;
 
   function log(msg) {
     console.log(PREFIX + " " + msg);
@@ -14,6 +17,17 @@
 
   function readWide(p) {
     try { return p.isNull() ? "" : p.readUtf16String(); } catch (_) { return "<unreadable>"; }
+  }
+
+  function formatBacktrace(context) {
+    try {
+      return Thread.backtrace(context, Backtracer.FUZZY)
+        .slice(0, 12)
+        .map(DebugSymbol.fromAddress)
+        .join(" <- ");
+    } catch (e) {
+      return "<backtrace failed: " + e + ">";
+    }
   }
 
   function hookLoaders() {
@@ -47,6 +61,32 @@
     attach("LoadLibraryExW", true);
   }
 
+  function hookKernelWaits() {
+    const kernel32 = Process.getModuleByName("kernel32.dll");
+
+    function traceWait(name, timeoutIndex) {
+      try {
+        const addr = kernel32.getExportByName(name);
+        Interceptor.attach(addr, {
+          onEnter(args) {
+            if (waitTraces >= MAX_WAIT_TRACES) return;
+            const timeout = args[timeoutIndex].toUInt32();
+            if (timeout !== 0xffffffff && timeout < 5000) return;
+            waitTraces++;
+            log(name + " timeout=" + timeout + " stack=" + formatBacktrace(this.context));
+          }
+        });
+      } catch (e) {
+        log("hook " + name + " failed: " + e);
+      }
+    }
+
+    traceWait("WaitForSingleObject", 1);
+    traceWait("WaitForSingleObjectEx", 1);
+    traceWait("WaitForMultipleObjects", 3);
+    traceWait("WaitForMultipleObjectsEx", 3);
+  }
+
   function installUser32Hooks() {
     let user32;
     try {
@@ -60,7 +100,7 @@
       try {
         const addr = user32.getExportByName(name);
         const argTypes = extended
-          ? ["pointer", "pointer", "pointer", "uint", "ushort"]
+          ? ["pointer", "pointer", "pointer", "uint", "uint"]
           : ["pointer", "pointer", "pointer", "uint"];
         Interceptor.replace(addr, new NativeCallback(function (hwnd, text, caption, type, lang) {
           const body = wide ? readWide(text) : readAnsi(text);
@@ -70,7 +110,9 @@
         }, "int", argTypes));
         log(name + " auto-dismiss installed");
       } catch (e) {
-        log("hook " + name + " failed: " + e);
+        if (!String(e).includes("already replaced")) {
+          log("hook " + name + " failed: " + e);
+        }
       }
     }
 
@@ -79,12 +121,26 @@
         const addr = user32.getExportByName(name);
         Interceptor.attach(addr, {
           onEnter(args) {
-            // CreateWindowEx*: class name at arg1, window title at arg2.
             this.className = wide ? readWide(args[1]) : readAnsi(args[1]);
             this.title = wide ? readWide(args[2]) : readAnsi(args[2]);
           },
           onLeave(retval) {
             log(name + " hwnd=" + retval + " class=" + JSON.stringify(this.className) + " title=" + JSON.stringify(this.title));
+          }
+        });
+      } catch (e) {
+        log("hook " + name + " failed: " + e);
+      }
+    }
+
+    function hookBlockingMessageCall(name) {
+      try {
+        const addr = user32.getExportByName(name);
+        Interceptor.attach(addr, {
+          onEnter() {
+            if (waitTraces >= MAX_WAIT_TRACES) return;
+            waitTraces++;
+            log(name + " stack=" + formatBacktrace(this.context));
           }
         });
       } catch (e) {
@@ -98,11 +154,17 @@
     replaceMessageBox("MessageBoxExW", true, true);
     hookCreateWindow("CreateWindowExA", false);
     hookCreateWindow("CreateWindowExW", true);
+    hookBlockingMessageCall("GetMessageA");
+    hookBlockingMessageCall("GetMessageW");
+    hookBlockingMessageCall("WaitMessage");
+    hookBlockingMessageCall("MsgWaitForMultipleObjects");
+    hookBlockingMessageCall("MsgWaitForMultipleObjectsEx");
     return true;
   }
 
   log("installing CI headless startup hooks");
   hookLoaders();
+  hookKernelWaits();
   installUser32Hooks();
   setTimeout(function () {
     installUser32Hooks();
