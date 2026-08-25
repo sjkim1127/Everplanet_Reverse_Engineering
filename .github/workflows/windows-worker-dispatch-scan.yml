@@ -1,0 +1,41 @@
+name: Windows worker dispatch scan
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'EverPlanet/**'
+      - 'scripts/ci_scan_worker_dispatch.py'
+      - '.github/workflows/windows-worker-dispatch-scan.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan-worker-dispatch:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout PE and scanner
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            EverPlanet
+            scripts
+          sparse-checkout-cone-mode: true
+          fetch-depth: 1
+      - name: Install dependencies
+        shell: pwsh
+        run: python -m pip install --disable-pip-version-check --quiet pefile capstone
+      - name: Scan worker object field references
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'worker-dispatch-scan.txt'
+          python scripts\ci_scan_worker_dispatch.py | Tee-Object -FilePath $out
+      - name: Upload scan
+        uses: actions/upload-artifact@v4
+        with:
+          name: everplanet-worker-dispatch-scan
+          path: ${{ runner.temp }}/worker-dispatch-scan.txt
+          retention-days: 7
