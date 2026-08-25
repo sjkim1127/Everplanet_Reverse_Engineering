@@ -4,10 +4,16 @@ on:
   pull_request:
     paths:
       - 'EverPlanet/**'
-      - 'frida/**'
-      - 'scripts/**'
+      - 'frida/hook_force_login.js'
+      - 'frida/hook_ci_headless.js'
+      - 'scripts/ci_frida_spawn_probe.py'
+      - 'scripts/requirements-ci.txt'
       - '.github/workflows/windows-client-smoke.yml'
   workflow_dispatch:
+
+concurrency:
+  group: everplanet-client-smoke-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -115,7 +121,7 @@ jobs:
                       $buf = New-Object byte[] 512
                       $n = $stream.Read($buf, 0, $buf.Length)
                       if ($n -gt 0) {
-                        $hex = ([BitConverter]::ToString($buf, 0, $n)).Replace('-', '')
+                        $hex = ([BitConverter]]::ToString($buf, 0, $n)).Replace('-', '')
                         Add-Content $LogPath "DATA $Port $n bytes $hex"
                       }
                     }
