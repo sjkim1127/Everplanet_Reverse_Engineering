@@ -1,0 +1,89 @@
+name: Windows client thread trace
+
+on:
+  pull_request:
+    paths:
+      - 'EverPlanet/**'
+      - 'frida/**'
+      - 'scripts/**'
+      - '.github/workflows/windows-client-thread-trace.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  thread-trace:
+    runs-on: windows-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout trace payload
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            EverPlanet
+            frida
+            scripts
+          sparse-checkout-cone-mode: true
+          fetch-depth: 1
+
+      - name: Install Frida
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check --quiet frida-tools
+          python -c "import frida; print('frida-python', frida.__version__)"
+
+      - name: Sample client threads
+        id: trace
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $diag = Join-Path $env:RUNNER_TEMP 'thread-trace'
+          New-Item -ItemType Directory -Path $diag -Force | Out-Null
+
+          $exe = Join-Path $PWD 'EverPlanet\EverPlanet_KR_v1842_U_DEVM.exe'
+          $probe = Join-Path $PWD 'scripts\ci_frida_spawn_probe.py'
+          $forceLogin = Join-Path $PWD 'frida\hook_force_login.js'
+          $headless = Join-Path $PWD 'frida\hook_ci_headless.js'
+          $sampler = Join-Path $PWD 'frida\ci_thread_sampler.js'
+          $stdout = Join-Path $diag 'thread-trace-stdout.txt'
+          $stderr = Join-Path $diag 'thread-trace-stderr.txt'
+
+          & python $probe --exe $exe --script $forceLogin --script $headless --script $sampler --duration 20 1> $stdout 2> $stderr
+          $probeExit = $LASTEXITCODE
+          "probe_exit=$probeExit" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+          Write-Host '--- thread trace highlights ---'
+          if (Test-Path $stdout) {
+            Select-String -Path $stdout -Pattern 'THREAD_TRACE|ci-frida|patchNmcogame|connect' | ForEach-Object { $_.Line }
+          }
+          Write-Host '--- stderr ---'
+          if (Test-Path $stderr) { Get-Content $stderr }
+
+          $loaded = $false
+          $samples = 0
+          if (Test-Path $stdout) {
+            $loaded = [bool](Select-String -Path $stdout -Pattern '\[THREAD_TRACE\] script_loaded' -Quiet)
+            $samples = @(Select-String -Path $stdout -Pattern '^\[THREAD_TRACE\] sample ').Count
+          }
+          "sampler_loaded=$($loaded.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "sample_count=$samples" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Upload thread trace
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-client-thread-trace
+          path: ${{ runner.temp }}/thread-trace
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Report thread trace
+        if: always()
+        shell: pwsh
+        run: |
+          Write-Host "Probe exit:      ${{ steps.trace.outputs.probe_exit }}"
+          Write-Host "Sampler loaded:  ${{ steps.trace.outputs.sampler_loaded }}"
+          Write-Host "Sample count:    ${{ steps.trace.outputs.sample_count }}"
