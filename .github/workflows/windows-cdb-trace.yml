@@ -1,6 +1,13 @@
 name: Windows client CDB trace
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'EverPlanet/**'
+      - 'scripts/ci_cdb_trace.txt'
+      - '.github/workflows/windows-cdb-trace.yml'
   pull_request:
     paths:
       - 'EverPlanet/**'
