@@ -56,10 +56,9 @@ jobs:
           $cmdFile = Join-Path $diag 'commands.txt'
           $cdb = '${{ steps.cdb.outputs.path }}'
 
-          # Event-driven debugger script. Module-load breakpoints install one-shot
-          # callbacks that log chronology and resume automatically. The connect
-          # breakpoint decodes sockaddr_in from the x86 stack and logs destination
-          # IPv4/port without modifying the client.
+          # CDB is now the primary hosted-CI dynamic tracer. Frida workflows are
+          # intentionally kept out of automatic CI; their scripts remain available
+          # for local/manual reverse-engineering experiments.
           @'
 .logopen /t "__LOG__"
 .symfix
