@@ -69,6 +69,7 @@ jobs:
         shell: pwsh
         run: |
           python -m pip install --disable-pip-version-check --quiet frida-tools
+          python -c "import frida; print('frida-python', frida.__version__)"
           frida --version
 
       - name: Probe redirected client connections
@@ -85,13 +86,14 @@ jobs:
           $gameDir = Join-Path $PWD 'EverPlanet'
           $exe = Join-Path $gameDir 'EverPlanet_KR_v1842_U_DEVM.exe'
           $hook = Join-Path $PWD 'frida\hook_force_login.js'
+          $probe = Join-Path $PWD 'scripts\ci_frida_spawn_probe.py'
 
           $listenerBlock = {
             param($Port, $LogPath)
             $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, $Port)
             $listener.Start()
             Add-Content $LogPath "LISTEN $Port"
-            $deadline = [DateTime]::UtcNow.AddSeconds(30)
+            $deadline = [DateTime]::UtcNow.AddSeconds(35)
             try {
               while ([DateTime]::UtcNow -lt $deadline) {
                 if ($listener.Pending()) {
@@ -126,32 +128,40 @@ jobs:
           }
           Start-Sleep -Seconds 1
 
-          $game = Start-Process -FilePath $exe -WorkingDirectory $gameDir -PassThru
-          Write-Host "Game PID=$($game.Id)"
-          Start-Sleep -Milliseconds 500
+          Write-Host 'Spawning client suspended through the Frida Python API...'
+          & python $probe --exe $exe --script $hook --duration 25 1> $fridaOut 2> $fridaErr
+          $probeExit = $LASTEXITCODE
+          "frida_exit_code=$probeExit" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
-          $frida = Start-Process -FilePath 'frida' -ArgumentList @('-p', "$($game.Id)", '-l', $hook) -PassThru -RedirectStandardOutput $fridaOut -RedirectStandardError $fridaErr
-          Write-Host "Frida PID=$($frida.Id)"
-          Start-Sleep -Seconds 25
-
-          Stop-Process -Id $frida.Id -Force -ErrorAction SilentlyContinue
-          Stop-Process -Id $game.Id -Force -ErrorAction SilentlyContinue
           $jobs | Stop-Job -ErrorAction SilentlyContinue
           $jobs | Receive-Job -ErrorAction SilentlyContinue | Out-Null
           $jobs | Remove-Job -Force -ErrorAction SilentlyContinue
 
           Write-Host '--- listener log ---'
           if (Test-Path $listenerLog) { Get-Content $listenerLog }
-          Write-Host '--- Frida connect lines ---'
-          if (Test-Path $fridaOut) { Select-String -Path $fridaOut -Pattern '\[connect\]|Force Login|Ws2_32|error' | ForEach-Object { $_.Line } }
+          Write-Host '--- Frida stdout ---'
+          if (Test-Path $fridaOut) { Get-Content $fridaOut }
+          Write-Host '--- Frida stderr ---'
           if (Test-Path $fridaErr) { Get-Content $fridaErr }
 
           $accepted = $false
           if (Test-Path $listenerLog) {
             $accepted = [bool](Select-String -Path $listenerLog -Pattern '^ACCEPT ' -Quiet)
           }
+          $hookLoaded = $false
+          $connectSeen = $false
+          if (Test-Path $fridaOut) {
+            $hookLoaded = [bool](Select-String -Path $fridaOut -Pattern '\[ci-frida\] script loaded' -Quiet)
+            $connectSeen = [bool](Select-String -Path $fridaOut -Pattern '\[connect\]' -Quiet)
+          }
+
           "tcp_accept=$($accepted.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          Write-Host "TCP accept observed: $accepted"
+          "hook_loaded=$($hookLoaded.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "connect_seen=$($connectSeen.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Frida probe exit: $probeExit"
+          Write-Host "Hook loaded:      $hookLoaded"
+          Write-Host "connect() seen:   $connectSeen"
+          Write-Host "TCP accept:       $accepted"
 
       - name: Capture Windows diagnostics
         if: always()
@@ -176,10 +186,18 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          Write-Host "Launch state: ${{ steps.launch.outputs.launch_state }}"
-          Write-Host "TCP accept:   ${{ steps.network.outputs.tcp_accept }}"
+          Write-Host "Launch state:    ${{ steps.launch.outputs.launch_state }}"
+          Write-Host "Frida exit code: ${{ steps.network.outputs.frida_exit_code }}"
+          Write-Host "Hook loaded:     ${{ steps.network.outputs.hook_loaded }}"
+          Write-Host "connect() seen:  ${{ steps.network.outputs.connect_seen }}"
+          Write-Host "TCP accept:      ${{ steps.network.outputs.tcp_accept }}"
+
           if ('${{ steps.network.outputs.tcp_accept }}' -eq 'true') {
             Write-Host 'Hosted-runner result: Frida redirection reached a local EverPlanet listener.'
+          } elseif ('${{ steps.network.outputs.connect_seen }}' -eq 'true') {
+            Write-Host 'EverPlanet reached connect(); redirected destination port is visible in the Frida log.'
+          } elseif ('${{ steps.network.outputs.hook_loaded }}' -eq 'true') {
+            Write-Host 'Frida successfully instrumented the client, but no connect() call was observed in this window.'
           } else {
-            Write-Host 'No local TCP accept observed yet; inspect Frida/listener diagnostics.'
+            Write-Host 'Frida instrumentation did not load successfully; inspect diagnostics.'
           }
