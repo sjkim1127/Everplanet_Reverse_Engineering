@@ -1,0 +1,151 @@
+name: Windows client smoke test
+
+on:
+  pull_request:
+    paths:
+      - 'EverPlanet/**'
+      - 'scripts/**'
+      - '.github/workflows/windows-client-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  client-smoke:
+    runs-on: windows-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout client files
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            EverPlanet
+            scripts
+          sparse-checkout-cone-mode: true
+          fetch-depth: 1
+
+      - name: Inspect client payload
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Join-Path $PWD 'EverPlanet\EverPlanet_KR_v1842_U_DEVM.exe'
+          if (-not (Test-Path $exe)) {
+            throw "Client executable not found: $exe"
+          }
+
+          $item = Get-Item $exe
+          Write-Host "Client: $($item.FullName)"
+          Write-Host "Size:   $($item.Length) bytes"
+          Write-Host "SHA256: $((Get-FileHash $exe -Algorithm SHA256).Hash)"
+
+          Write-Host 'Nearby runtime files:'
+          Get-ChildItem (Split-Path $exe) -File |
+            Where-Object { $_.Extension -in '.dll', '.exe', '.dat', '.pin' } |
+            Sort-Object Name |
+            Select-Object Name, Length |
+            Format-Table -AutoSize
+
+      - name: Attempt GUI client launch
+        id: launch
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $gameDir = Join-Path $PWD 'EverPlanet'
+          $exe = Join-Path $gameDir 'EverPlanet_KR_v1842_U_DEVM.exe'
+          $stdout = Join-Path $env:RUNNER_TEMP 'everplanet-stdout.txt'
+          $stderr = Join-Path $env:RUNNER_TEMP 'everplanet-stderr.txt'
+
+          Write-Host "Launching $exe on GitHub-hosted Windows runner..."
+
+          try {
+            $p = Start-Process \
+              -FilePath $exe \
+              -WorkingDirectory $gameDir \
+              -PassThru \
+              -RedirectStandardOutput $stdout \
+              -RedirectStandardError $stderr
+          } catch {
+            Write-Host "Start-Process failed: $($_.Exception.Message)"
+            "launch_state=start_failed" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            exit 1
+          }
+
+          "pid=$($p.Id)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "PID: $($p.Id)"
+
+          Start-Sleep -Seconds 15
+          $p.Refresh()
+
+          if ($p.HasExited) {
+            Write-Host "Client exited during smoke window. ExitCode=$($p.ExitCode)"
+            "launch_state=exited" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            "exit_code=$($p.ExitCode)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          } else {
+            Write-Host 'Client remained alive for 15 seconds.'
+            "launch_state=alive" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+            Get-Process -Id $p.Id |
+              Select-Object Id, ProcessName, CPU, WorkingSet64, Responding, StartTime |
+              Format-List
+
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          }
+
+          Write-Host '--- stdout ---'
+          if (Test-Path $stdout) { Get-Content $stdout -ErrorAction SilentlyContinue }
+          Write-Host '--- stderr ---'
+          if (Test-Path $stderr) { Get-Content $stderr -ErrorAction SilentlyContinue }
+
+      - name: Capture Windows diagnostics
+        if: always()
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'diagnostics'
+          New-Item -ItemType Directory -Path $out -Force | Out-Null
+
+          Get-CimInstance Win32_OperatingSystem |
+            Format-List Caption, Version, BuildNumber, OSArchitecture |
+            Out-File (Join-Path $out 'os.txt')
+
+          Get-CimInstance Win32_VideoController |
+            Format-List Name, DriverVersion, AdapterRAM, VideoModeDescription |
+            Out-File (Join-Path $out 'video.txt')
+
+          Get-Process |
+            Sort-Object ProcessName |
+            Select-Object Id, ProcessName, CPU, WorkingSet64 |
+            Format-Table -AutoSize |
+            Out-File (Join-Path $out 'processes.txt')
+
+          $stdout = Join-Path $env:RUNNER_TEMP 'everplanet-stdout.txt'
+          $stderr = Join-Path $env:RUNNER_TEMP 'everplanet-stderr.txt'
+          if (Test-Path $stdout) { Copy-Item $stdout $out }
+          if (Test-Path $stderr) { Copy-Item $stderr $out }
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-client-smoke-diagnostics
+          path: ${{ runner.temp }}/diagnostics
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Report smoke result
+        if: always()
+        shell: pwsh
+        run: |
+          Write-Host "Launch state: ${{ steps.launch.outputs.launch_state }}"
+          Write-Host "PID:          ${{ steps.launch.outputs.pid }}"
+          Write-Host "Exit code:    ${{ steps.launch.outputs.exit_code }}"
+
+          if ('${{ steps.launch.outputs.launch_state }}' -eq 'alive') {
+            Write-Host 'Hosted-runner result: the GUI client can at least start and remain alive for the smoke window.'
+          } elseif ('${{ steps.launch.outputs.launch_state }}' -eq 'exited') {
+            Write-Host 'Hosted-runner result: the process starts but exits early; inspect the diagnostics artifact.'
+          } else {
+            Write-Host 'Hosted-runner result: the executable could not be launched; inspect the failed step and diagnostics.'
+          }
