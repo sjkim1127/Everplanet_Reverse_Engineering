@@ -1,8 +1,13 @@
 # EverPlanet Reverse Engineering
 
-Reverse-engineering workspace for the discontinued **EverPlanet KR** Windows client, focused on reconstructing client behavior, proprietary network protocol state, resource/container formats, launcher/authentication flow, and the minimum server-side behavior required for local emulation experiments.
+> [!IMPORTANT]
+> **Project status: discontinued / archived.**
+>
+> Active development has been stopped. A working private server is now available, and there is also a possibility of an official EverPlanet relaunch, so continuing this reverse-engineering/server-emulation effort no longer has enough practical value to justify further work.
+>
+> This repository will remain available as a historical reverse-engineering record and reference. No further development is currently planned.
 
-> **Project status:** research / work in progress. Several subsystems are partially reconstructed, but this repository does **not** claim a complete KR server implementation or a complete independent recovery of every protocol primitive.
+Reverse-engineering workspace for the discontinued **EverPlanet KR** Windows client, focused on reconstructing client behavior, proprietary network protocol state, resource/container formats, launcher/authentication flow, and the minimum server-side behavior required for local emulation experiments.
 
 ## Scope
 
@@ -211,4 +216,4 @@ Useful starting points in `docs/` include:
 
 ## Purpose
 
-EverPlanet is a discontinued game, and this repository is maintained as a software-preservation and reverse-engineering research project. The focus is understanding legacy client behavior and reconstructing enough surrounding infrastructure to study the original software in a controlled local environment.
+EverPlanet was discontinued during the period covered by this research. This repository is now retained as a software-preservation and reverse-engineering archive documenting legacy client behavior and the surrounding reconstruction experiments.
